@@ -22,52 +22,23 @@ class_names = ['Nitrogen', 'Phosphorus', 'Potassium']
 # Initialize model as None
 model = None
 
-def load_model():
-    global model
+def create_model():
+    """Create the model architecture"""
     try:
-        print(f"Loading model from: {MODEL_PATH}")
-        print(f"Model file exists: {os.path.exists(MODEL_PATH)}")
+        # Create the base model
+        base_model = tf.keras.applications.EfficientNetB0(
+            weights=None,
+            include_top=False,
+            input_shape=(224, 224, 3)
+        )
         
-        # First try loading with custom_objects
-        try:
-            model = tf.keras.models.load_model(MODEL_PATH, compile=False)
-            print("Model loaded successfully with compile=False")
-        except Exception as e1:
-            print(f"First attempt failed: {str(e1)}")
-            
-            # If that fails, try loading with custom_objects and custom_metrics
-            try:
-                model = tf.keras.models.load_model(
-                    MODEL_PATH,
-                    compile=False,
-                    custom_objects={
-                        'InputLayer': tf.keras.layers.InputLayer,
-                        'EfficientNetB0': tf.keras.applications.EfficientNetB0
-                    }
-                )
-                print("Model loaded successfully with custom_objects")
-            except Exception as e2:
-                print(f"Second attempt failed: {str(e2)}")
-                
-                # If that fails, try loading the model architecture and weights separately
-                try:
-                    # Create the model architecture
-                    base_model = tf.keras.applications.EfficientNetB0(
-                        weights=None,
-                        include_top=False,
-                        input_shape=(224, 224, 3)
-                    )
-                    x = base_model.output
-                    x = tf.keras.layers.GlobalAveragePooling2D()(x)
-                    x = tf.keras.layers.Dense(3, activation='softmax')(x)
-                    model = tf.keras.Model(inputs=base_model.input, outputs=x)
-                    
-                    # Load the weights
-                    model.load_weights(MODEL_PATH)
-                    print("Model loaded successfully by recreating architecture")
-                except Exception as e3:
-                    print(f"Third attempt failed: {str(e3)}")
-                    raise Exception("Failed to load model after multiple attempts")
+        # Add custom layers
+        x = base_model.output
+        x = tf.keras.layers.GlobalAveragePooling2D()(x)
+        x = tf.keras.layers.Dense(3, activation='softmax')(x)
+        
+        # Create the model
+        model = tf.keras.Model(inputs=base_model.input, outputs=x)
         
         # Compile the model
         model.compile(
@@ -75,7 +46,36 @@ def load_model():
             loss='categorical_crossentropy',
             metrics=['accuracy']
         )
-        print("Model compiled successfully")
+        
+        return model
+    except Exception as e:
+        print(f"Error creating model: {str(e)}")
+        raise
+
+def load_model():
+    global model
+    try:
+        print(f"Loading model from: {MODEL_PATH}")
+        print(f"Model file exists: {os.path.exists(MODEL_PATH)}")
+        
+        if not os.path.exists(MODEL_PATH):
+            raise FileNotFoundError(f"Model file not found at {MODEL_PATH}")
+        
+        # Create the model architecture first
+        model = create_model()
+        
+        # Try to load the weights
+        try:
+            model.load_weights(MODEL_PATH)
+            print("Model weights loaded successfully")
+        except Exception as e:
+            print(f"Error loading weights: {str(e)}")
+            raise
+        
+        # Verify the model is working
+        test_input = np.random.random((1, 224, 224, 3))
+        _ = model.predict(test_input, verbose=0)
+        print("Model verification successful")
         
     except Exception as e:
         print(f"Error loading model: {str(e)}")
@@ -121,7 +121,10 @@ def predict():
     try:
         # Check if model is loaded
         if model is None:
-            return jsonify({'error': 'Model not loaded'}), 500
+            print("Model not loaded, attempting to load...")
+            load_model()
+            if model is None:
+                return jsonify({'error': 'Failed to load model'}), 500
         
         # Get the JSON data from the request
         data = request.get_json()
@@ -159,14 +162,18 @@ def predict():
         print(f"Error during prediction: {str(e)}")  # Debug log
         return jsonify({'error': str(e)}), 500
 
-if __name__ == '__main__':
-    print("Starting Flask server...")
-    print(f"Model path: {MODEL_PATH}")
-    print(f"Model exists: {os.path.exists(MODEL_PATH)}")
-    
-    # Load the model
+# Load the model when the application starts
+print("Starting Flask server...")
+print(f"Model path: {MODEL_PATH}")
+print(f"Model exists: {os.path.exists(MODEL_PATH)}")
+
+try:
     load_model()
-    
+    print("Model loaded successfully at startup")
+except Exception as e:
+    print(f"Error loading model at startup: {str(e)}")
+
+if __name__ == '__main__':
     # Get port from environment variable or use default
     port = int(os.environ.get('PORT', 5000))
     

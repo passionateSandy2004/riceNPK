@@ -9,6 +9,11 @@ import io
 from PIL import Image
 import time
 import h5py
+import gc
+
+# Force CPU usage
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+tf.config.set_visible_devices([], 'GPU')
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -45,11 +50,12 @@ def create_model():
         # Create the model
         model = tf.keras.Model(inputs=base_model.input, outputs=x)
         
-        # Compile the model
+        # Compile the model with CPU-optimized settings
         model.compile(
             optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
             loss='categorical_crossentropy',
-            metrics=['accuracy']
+            metrics=['accuracy'],
+            run_eagerly=False  # Disable eager execution for better performance
         )
         
         return model
@@ -66,10 +72,23 @@ def load_model():
         if not os.path.exists(MODEL_PATH):
             raise FileNotFoundError(f"Model file not found at {MODEL_PATH}")
         
+        # Clear any existing model from memory
+        if model is not None:
+            del model
+            gc.collect()
+        
         # First try to load the entire model
         try:
-            model = tf.keras.models.load_model(MODEL_PATH)
+            model = tf.keras.models.load_model(MODEL_PATH, compile=False)
             print("Model loaded successfully as complete model")
+            
+            # Recompile the model with CPU-optimized settings
+            model.compile(
+                optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+                loss='categorical_crossentropy',
+                metrics=['accuracy'],
+                run_eagerly=False
+            )
         except Exception as e1:
             print(f"Complete model loading failed: {str(e1)}")
             
@@ -85,10 +104,14 @@ def load_model():
                 print(f"Model creation and weight loading failed: {str(e2)}")
                 raise
         
-        # Verify the model is working
+        # Verify the model is working with a small test input
         test_input = np.random.random((1, 224, 224, 3))
         _ = model.predict(test_input, verbose=0)
         print("Model verification successful")
+        
+        # Clear test input from memory
+        del test_input
+        gc.collect()
         
     except Exception as e:
         print(f"Error loading model: {str(e)}")
@@ -164,6 +187,10 @@ def predict():
         confidence = float(np.max(predictions[0]) * 100)
         inference_time = end_time - start_time
         
+        # Clear processed image from memory
+        del processed_image
+        gc.collect()
+        
         return jsonify({
             'class': int(predicted_class_idx),  # 0, 1, or 2
             'class_name': class_names[predicted_class_idx],
@@ -179,6 +206,7 @@ def predict():
 print("Starting Flask server...")
 print(f"Model path: {MODEL_PATH}")
 print(f"Model exists: {os.path.exists(MODEL_PATH)}")
+print("Using CPU for inference")
 
 try:
     load_model()

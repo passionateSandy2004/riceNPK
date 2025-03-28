@@ -25,16 +25,21 @@ model = None
 def create_model():
     """Create the model architecture"""
     try:
-        # Create the base model
+        # Create the base model with the same configuration as the saved model
         base_model = tf.keras.applications.EfficientNetB0(
-            weights=None,
+            weights='imagenet',  # Use ImageNet weights
             include_top=False,
             input_shape=(224, 224, 3)
         )
         
+        # Freeze the base model layers
+        base_model.trainable = False
+        
         # Add custom layers
         x = base_model.output
         x = tf.keras.layers.GlobalAveragePooling2D()(x)
+        x = tf.keras.layers.Dense(512, activation='relu')(x)
+        x = tf.keras.layers.Dropout(0.5)(x)
         x = tf.keras.layers.Dense(3, activation='softmax')(x)
         
         # Create the model
@@ -42,7 +47,7 @@ def create_model():
         
         # Compile the model
         model.compile(
-            optimizer='adam',
+            optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
             loss='categorical_crossentropy',
             metrics=['accuracy']
         )
@@ -61,16 +66,24 @@ def load_model():
         if not os.path.exists(MODEL_PATH):
             raise FileNotFoundError(f"Model file not found at {MODEL_PATH}")
         
-        # Create the model architecture first
-        model = create_model()
-        
-        # Try to load the weights
+        # First try to load the entire model
         try:
-            model.load_weights(MODEL_PATH)
-            print("Model weights loaded successfully")
-        except Exception as e:
-            print(f"Error loading weights: {str(e)}")
-            raise
+            model = tf.keras.models.load_model(MODEL_PATH)
+            print("Model loaded successfully as complete model")
+        except Exception as e1:
+            print(f"Complete model loading failed: {str(e1)}")
+            
+            # If that fails, create the model and load weights
+            try:
+                # Create the model architecture
+                model = create_model()
+                
+                # Load the weights
+                model.load_weights(MODEL_PATH)
+                print("Model weights loaded successfully")
+            except Exception as e2:
+                print(f"Model creation and weight loading failed: {str(e2)}")
+                raise
         
         # Verify the model is working
         test_input = np.random.random((1, 224, 224, 3))
